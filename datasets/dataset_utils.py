@@ -31,7 +31,10 @@ def normal_image_preprocess(training_data, test_data):
 
     # Perform transformation
     for i in range(training_data.shape[channel_axis]):
-        mean_val = np.mean(training_data[:, :, :, i])
+        if channel_axis == 1:
+            mean_val = np.mean(training_data[:, i])
+        else:
+            mean_val = np.mean(training_data[:, :, :, i])
         
         training_data[:, :, :, i] -= mean_val
         training_data[:, :, :, i] /= 127.5
