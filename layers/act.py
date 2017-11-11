@@ -25,6 +25,20 @@ def FlagLayer(init_var, name=None):
     return Lambda(func, name=name)    
 
 
+# Create a zero-ed layer with a custom shape    
+def CreateCustomShapeLayer(final_dim, name=None):
+    def func(x, final_dim=final_dim):
+        initial_state = K.zeros_like(x)  # (samples, input_dim)
+        initial_state = K.sum(initial_state, axis=-1)  # (samples,)
+        initial_state = K.expand_dims(initial_state)  # (samples, 1)
+        
+        # Build zero-ed intermediate states by getting dimension of each state        
+        final_state = K.tile(initial_state, [1, final_dim])  # (samples, final_dim)
+        return final_state
+        
+    return Lambda(func, name=name)    
+    
+    
 # Wrapper for a "zeros" call
 def ResetLayer(name=None):
     def func(x):

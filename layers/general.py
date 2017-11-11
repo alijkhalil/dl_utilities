@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 
 import warnings, math
+import tensorflow as tf
 
 import keras.backend as K
 from keras.engine.topology import Layer
@@ -78,6 +79,27 @@ def crop(start, end=0, dimension=-1, name=None):
     return Lambda(func, name=name)
     
 
+# Layer for wrapping "while_loop" TF and (though not yet implemented) "scan" for Theano
+def loop_layer(cond_func, step_func, name=None):
+    if K.backend() != 'tensorflow':
+        raise NotImplementedError("The 'loop_layer' is needed for the ACT_Cell and " \
+                                    "is only implemented for TensorFlow as the backend.\n" \
+                                    "If possible, you should use Keras with a TF backend.")
+        
+    def func(tensors, cond_func=cond_func, step_func=step_func):
+        tensors = tf.while_loop(cond_func,
+                                    step_func,
+                                    loop_vars=tensors,
+                                    parallel_iterations=1)
+        
+        acclum_output = tensors[2]
+        acclum_state, prob, counter = tensors[4:7]
+                                
+        return [acclum_output, acclum_state, prob, counter]
+        
+    return Lambda(func, name=name)  
+
+    
 # Layer for scaling down activations at test time
 def scale_activations(drop_rate, name=None):
     def func(x, drop_rate=drop_rate):
