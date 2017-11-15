@@ -1,5 +1,9 @@
+# Import statements
+import operator
+
 import numpy as np
 from keras import backend as K
+
 
 
 ####### Image Pre-processing Functions
@@ -44,3 +48,57 @@ def normal_image_preprocess(training_data, test_data):
     
     # Return 0 centered data (ranging from -1 to 1)
     return training_data, test_data
+    
+
+
+####### Text Processing Functions (mostly for IMDB dataset with RNNs)    
+
+# Convert a sequence of word ID's into a string
+def convert_word_list_to_str(word_list, sorted_keys, start_index=4):
+    out_string=""
+    
+    # Iterate through word ID's
+    for i, num in enumerate(word_list):
+        if num == 1:
+            out_string += '^'
+        elif num == 2:
+            out_string += '*'
+        else:
+            out_string += sorted_keys[num-start_index][0]
+            if i + 1 != len(word_list):
+                out_string += ' '
+        
+    # Add end token
+    out_string += '$'
+    
+    
+    # Return it
+    return out_string
+
+
+# Convert a specially formmated string (from 'convert_review_to_str') into an list of chars 
+def convert_str_to_char_list(input_str):
+    char_ord = ord('a')
+    digit_ord = ord('0')
+
+    # Transform string into list of chars (omitting unusual chars)
+    char_list = []
+    for char in input_str:
+        if char == '^':
+            char_list.append(1)
+        elif char == '$':
+            char_list.append(2)
+        elif char == ' ':
+            char_list.append(3)
+        elif char == '\'':
+            char_list.append(4)                
+        elif char >= 'a' and char <= 'z':
+            char_list.append(ord(char) - char_ord + 5)
+        elif char >= '0' and char <= '9':
+            char_list.append(ord(char) - digit_ord + 31)
+    
+    
+    # Return char review list
+    return np.array(char_list)
+
+    
