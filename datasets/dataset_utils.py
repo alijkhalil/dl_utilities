@@ -1,6 +1,4 @@
 # Import statements
-import operator
-
 import numpy as np
 from keras import backend as K
 
@@ -53,6 +51,11 @@ def normal_image_preprocess(training_data, test_data):
 
 ####### Text Processing Functions (mostly for IMDB dataset with RNNs)    
 
+special_chars = [ '^', '$', ' ', '\'' ]
+alpha_chars = [ chr(ord('a') + i) for i in range(26) ]
+digit_chars = [ chr(ord('0') + i) for i in range(10) ]
+
+
 # Convert a sequence of word ID's into a string
 def convert_word_list_to_str(word_list, sorted_keys, start_index=4):
     out_string=""
@@ -78,27 +81,59 @@ def convert_word_list_to_str(word_list, sorted_keys, start_index=4):
 
 # Convert a specially formmated string (from 'convert_review_to_str') into an list of chars 
 def convert_str_to_char_list(input_str):
-    char_ord = ord('a')
-    digit_ord = ord('0')
+    min_char_ord = ord('a')
+    min_digit_ord = ord('0')
+    
+    special_start = 1
+    alpha_start = len(special_chars) + special_start
+    digit_start = len(alpha_chars) + alpha_start
+    
+    def find_index(item, list):
+        for i, tmp_item in enumerate(list):
+            if item == tmp_item:
+                return i
+        
+        return 0
 
     # Transform string into list of chars (omitting unusual chars)
     char_list = []
     for char in input_str:
-        if char == '^':
-            char_list.append(1)
-        elif char == '$':
-            char_list.append(2)
-        elif char == ' ':
-            char_list.append(3)
-        elif char == '\'':
-            char_list.append(4)                
+        if char in special_chars:
+            char_list.append(find_index(char, special_chars) + special_start)
+            
         elif char >= 'a' and char <= 'z':
-            char_list.append(ord(char) - char_ord + 5)
-        elif char >= '0' and char <= '9':
-            char_list.append(ord(char) - digit_ord + 31)
+            char_list.append(ord(char) - min_char_ord + alpha_start)
+            
+        elif char in digit_chars:
+            char_list.append(ord(char) - min_digit_ord + digit_start)
     
     
     # Return char review list
-    return np.array(char_list)
+    return char_list
+        
+
+# Get possible chars in conversion (with addition of 1 for padding char)
+def get_total_possible_chars():
+    return (len(special_chars) + 
+                len(alpha_chars) + 
+                len(digit_chars) + 
+                1)
+                
+    
+# Use functions above to convert word-based dataset to char-based one
+def convert_word_dataset_to_char_dataset(X_dataset, sorted_keys):
+    # Convert to strings
+    str_reviews = []
+    for i in range(len(X_dataset)):
+        str_reviews.append(convert_word_list_to_str(X_dataset[i], sorted_keys))
+        
+    # Iterate through each review and convert to char-based lists
+    char_reviews = []
+    for str_review in str_reviews:
+        char_reviews.append(convert_str_to_char_list(str_review))
+        
+    
+    # Return text in char sequence format
+    return char_reviews
 
     
