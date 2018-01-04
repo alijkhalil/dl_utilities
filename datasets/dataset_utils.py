@@ -144,14 +144,15 @@ def convert_word_dataset_to_char_dataset(X_dataset, sorted_keys):
 
 ####### More Text Processing Functions (mostly for NLTK datasets)    
 
+# TO DO:  Eventually add 'europarl_raw' to acceptable general corpuses
 valid_general_corpuses=['brown']
+lang_opts = ['EN-FR', 'DE-EN', 'DE-FR']
+
 
 
 # Validate languages
 def validate_langs_and_get_fileids(langs):
     # Ensure valid input
-    lang_opts = ['EN-FR', 'DE-EN', 'DE-FR']
-    
     if type(langs) not in (list, tuple):
         raise ValueError("'Langs' variable must be either a tuple or list of desired "
                             "language pairs.")
@@ -301,8 +302,12 @@ def get_mapping_items(all_bytes):
 def get_translated_corpus_chars(langs=['EN-FR'], min_len=75, max_len=250):
     # Validate languages and get corresponding ID's
     fileids = validate_langs_and_get_fileids(langs)    
-
-                
+    
+    # Validate min_len
+    if min_len > max_len:
+        raise ValueError("The 'min_len' variable should be smaller than 'max_len' variable.")
+               
+               
     # Load desired parallel corpus(es)
     align_sents = comtrans.aligned_sents(fileids=fileids)
     
@@ -359,6 +364,7 @@ def get_translated_corpus_chars(langs=['EN-FR'], min_len=75, max_len=250):
 
     
 # Generator for char-level text blobs from various corpus (in NLTK framework)
+#       Returned as a generator to expending memory if the entire dataset is superfluous
 def gen_corpus_examples(example_size, min_example_size=None, 
                             trim_long_examples=True, corpus='brown', 
                             categories=None, use_paragraphs=False):
