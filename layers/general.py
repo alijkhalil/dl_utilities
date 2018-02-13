@@ -9,7 +9,7 @@ import tensorflow as tf
 import keras.backend as K
 from keras.engine.topology import Layer
 from keras.layers.core import Lambda
-from keras.layers.merge import add
+from keras.layers.merge import add, _Merge
 
 
 
@@ -56,6 +56,15 @@ class LN(Layer):
         return input_shape 
         
 
+# Similar layer to "Add" layer (except obviously substracts rather than 'adds')
+class Subtract(_Merge):
+    def _merge_function(self, inputs):
+        output = inputs[0]
+        for i in range(1, len(inputs)):
+            output -= inputs[i]
+        return output
+        
+        
 # Helper for getting a subsection of a layer
 def crop(start, end=0, dimension=-1, name=None):
     def func(x, start=start, end=end, dimension=dimension):
@@ -79,26 +88,65 @@ def crop(start, end=0, dimension=-1, name=None):
     return Lambda(func, name=name)
     
 
-# Layer for wrapping "while_loop" TF and (though not yet implemented) "scan" for Theano
-def loop_layer(cond_func, step_func, name=None):
-    if K.backend() != 'tensorflow':
-        raise NotImplementedError("The 'loop_layer' is needed for the ACT_Cell and " \
-                                    "is only implemented for TensorFlow as the backend.\n" \
-                                    "If possible, you should use Keras with a TF backend.")
+# Layer to get a single spatial embedding from layer of CNN
+def GetSpecificSpatialFeatures(w, h, name=None):
+    def func(cnn_embed, w=w, h=h):            
+        return cnn_embed[:, w, h, :]
         
-    def func(tensors, cond_func=cond_func, step_func=step_func):
-        tensors = tf.while_loop(cond_func,
-                                    step_func,
-                                    loop_vars=tensors,
-                                    parallel_iterations=1)
-        
-        acclum_output = tensors[2]
-        acclum_state, prob, counter = tensors[4:7]
-                                
-        return [acclum_output, acclum_state, prob, counter]
-        
-    return Lambda(func, name=name)  
+    return Lambda(func, name=name)
 
+    
+# Layer to add positional channels on top of regular RGB (for relational processing)    
+def AddPositionalChannels(name=None):
+    def func(x):
+        # Get key variables
+        _, height, width, _ = K.int_shape(x)
+        
+        height_inc = float(1.0 / height)
+        width_inc = float(1.0 / width)
+        
+        
+        # Get y-axis channel
+        scalar_val = 0
+        height_tensors = []
+        for _ in range(height):
+            tmp_tensor = K.zeros_like(x)  # (height, width, channels)
+            tmp_tensor = K.sum(K.sum(tmp_tensor, axis=-1), axis=1)  # (width,)
+            tmp_tensor = K.expand_dims(tmp_tensor, 1)  # (1, width)
+            
+            scalar_val += height_inc
+            tmp_tensor += scalar_val
+            
+            height_tensors.append(tmp_tensor)
+        
+        y_axis_channel = K.expand_dims(K.concatenate(height_tensors, axis=1))
+
+        
+        # Get x-axis channel
+        scalar_val = 0
+        width_tensors = []
+        for _ in range(width):
+            tmp_tensor = K.zeros_like(x)  # (height, width, channels)
+            tmp_tensor = K.sum(K.sum(tmp_tensor, axis=-1), axis=-1)  # (height,)
+            tmp_tensor = K.expand_dims(tmp_tensor)  # (1, height)
+
+            scalar_val += width_inc
+            tmp_tensor += scalar_val
+            
+            width_tensors.append(tmp_tensor)
+
+        x_axis_channel = K.expand_dims(K.concatenate(width_tensors, axis=-1))
+
+        
+        # Return all axises stacked together     
+        all_channels = [ x ]
+        all_channels.append(y_axis_channel)
+        all_channels.append(x_axis_channel)
+        
+        return K.concatenate(all_channels)
+        
+    return Lambda(func, name=name)    
+    
     
 # Layer for scaling down activations at test time
 def scale_activations(drop_rate, name=None):

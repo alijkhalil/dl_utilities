@@ -4,11 +4,64 @@ from __future__ import absolute_import
 from __future__ import division
 
 import numpy as np
+from keras.preprocessing.image import ImageDataGenerator
 
 
 PADDING_TOKEN_ENCODING = 0
 END_TOKEN_ENCODING = 1
 
+
+
+# Image augmentation generator (with option to return other inputs too)
+# Those input (numpy array) values should passed as "list_other_train_items" (in list form)
+# Also, to customize the Keras ImageDataGenerator, its parameters can be passes as 'kwargs'
+class MultiInputImageGenerator(object):
+    def __init__(self, train_imgs, list_other_train_items, 
+                        train_labels, batch_size, **kwargs):		
+        
+        # Make augmented image genator
+        use_default_gen_args = False if len(kwargs) else True
+        if use_default_gen_args:
+            width_shift_range = int(0.15 * train_imgs.shape[2])
+            height_shift_range = int(0.15 * train_imgs.shape[1])
+            
+            global_image_aug = ImageDataGenerator(
+                                            rotation_range=15,
+                                            width_shift_range=width_shift_range,
+                                            height_shift_range=height_shift_range,
+                                            horizontal_flip=True,
+                                            zoom_range=0.2)
+        else:
+            global_image_aug = ImageDataGenerator(**kwargs)
+            
+        # Set up with placeholder array to know shuffled indices of each batch
+        placeholder_labels = np.arange(train_imgs.shape[0])                               
+        self.image_gen = global_image_aug.flow(train_imgs, placeholder_labels, 
+                                                    batch_size=batch_size)    
+        
+        # Save other variables
+        self.list_other_train_items = list_other_train_items
+        self.train_labels = train_labels
+        
+        
+    # Iterator returns itself
+    def __iter__(self):
+        return self
+
+        
+    # Python 2 and 3 compatibility for the standard iter "next" call
+    def __next__(self):
+        return self.next()
+
+        
+    def next(self):			
+        imgs, item_order = self.image_gen.next()
+        
+        ret_items = [ imgs ]
+        for item_batch in self.list_other_train_items:
+            ret_items.append(item_batch[item_order])
+            
+        return (ret_items, self.train_labels[item_order])
 
 
 # Assumes stride of 1 and any non-valid padding scheme

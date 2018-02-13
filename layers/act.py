@@ -1,8 +1,10 @@
+# Import statements
 from __future__ import print_function
 from __future__ import absolute_import
 from __future__ import division
 
 import warnings, math
+import tensorflow as tf
 
 import keras.backend as K
 from keras.layers.core import Lambda
@@ -17,6 +19,27 @@ and therefore, may not describe their functionality
 in the most general way.
 '''
 
+# Layer for wrapping "while_loop" TF and (though not yet implemented) "scan" for Theano
+def act_loop_layer(cond_func, step_func, name=None):
+    if K.backend() != 'tensorflow':
+        raise NotImplementedError("The 'loop_layer' is needed for the ACT_Cell and " \
+                                    "is only implemented for TensorFlow as the backend.\n" \
+                                    "If possible, you should use Keras with a TF backend.")
+        
+    def func(tensors, cond_func=cond_func, step_func=step_func):
+        tensors = tf.while_loop(cond_func,
+                                    step_func,
+                                    loop_vars=tensors,
+                                    parallel_iterations=1)
+        
+        acclum_output = tensors[2]
+        acclum_state, prob, counter = tensors[4:7]
+                                
+        return [acclum_output, acclum_state, prob, counter]
+        
+    return Lambda(func, name=name)  
+
+    
 # Essentially a wrapper for a switch gate
 def FlagLayer(init_var, name=None):
     def func(tensors, init_var=init_var):
@@ -50,7 +73,7 @@ def ResetLayer(name=None):
 # Converts tensor to float 0's and 1's based on comparison with another tensor
 def CompLayer(name=None):
     def func(tensors):
-        return K.cast(K.less(tensors[0], tensors[1]), dtype='float32')    
+        return K.cast(K.less(tensors[0], tensors[1]), dtype='float32')
     
     return Lambda(func, name=name)     
 
