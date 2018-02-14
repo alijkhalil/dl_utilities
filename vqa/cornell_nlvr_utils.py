@@ -1,7 +1,6 @@
 # Import statements
-import json
-import git
-import os
+import json, git, os
+import random
 import numpy as np
 
 from PIL import Image
@@ -10,6 +9,8 @@ from keras.layers import Embedding
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.utils.np_utils import to_categorical
+
+from dl_utilities.general import general as gen_utils
 
 
 
@@ -23,8 +24,64 @@ train_img_dir = dataset_dir + 'train/images'
 test_json = dataset_dir + 'dev/dev.json'
 test_img_dir = dataset_dir + 'dev/images'
 
+synonyms = [['over', 'above'], ['positions', 'places'], ['corner', 'edge', 'side'],
+                ['only', 'just'], ['under', 'beneath', 'below'], ['nearly', 'almost', 'closely'],
+                ['each', 'every'], ['petite', 'small'], ['directly', 'immediately'],
+                ['multiple', 'many'], ['objects', 'things', 'items'], ['squares', 'boxes'],
+                ['after', 'following'], ['contain', 'capture'], ['box', 'square'], 
+                ['number', 'quantity', 'count'], ['attach', 'fixate'], ['type', 'style'],
+                ['medium', 'average'], ['positioned', 'placed'], ['exactly', 'precisely'],
+                ['attached', 'fixated'], ['different', 'unique'], ['same', 'identical'],
+                ['other', 'alternative'], ['position', 'place'], ['stack', 'pile'],
+                ['single', 'one']]
 
+                
+                
+# Similar to the MultiInputImageGenerator except randomly replaces some words with synomyms
+class CornellDataAugmentor(object):
+    def __init__(self, train_imgs, train_word_lists, word_index, 
+                        train_labels, batch_size, **kwargs):		
+        
+        # Make an dictionary index for synomyms
+        self.word_syn_lookup = {}
+        for syn_list in synonyms:
+            syn_as_ids = [ word_index[word] for word in syn_list ]
+            for id in syn_as_ids:
+                self.word_syn_lookup[id] = syn_as_ids
+                
+        # Initailize augmented image generator
+        self.inner_gen = gen_utils.MultiInputImageGenerator(train_imgs, [train_word_lists], 
+                                                                train_labels, batch_size, **kwargs)
+                                   
+                                   
+    # Iterator returns itself
+    def __iter__(self):
+        return self
 
+        
+    # Python 2 and 3 compatibility for the standard iter "next" call
+    def __next__(self):
+        return self.next()
+
+        
+    def next(self):			
+        ret_items, ret_labels = self.inner_gen.next()
+        ret_img, ret_words = ret_items
+        
+        for i, word_list in enumerate(ret_words):
+            for j, word in enumerate(word_list):
+                options = self.word_syn_lookup.get(word)
+                
+                if options is not None:
+                    rand_val = random.uniform(0, 1)
+                    word_i = int(rand_val * len(options))
+                    
+                    ret_words[i, j] = options[word_i]
+        
+        return ([ret_img, ret_words], ret_labels)
+                
+                
+                
 # Get GIT repo for Cornell NLVR dataset
 def get_cornell_nlvr_repo():
     if not os.path.isdir(dataset_dir):
@@ -79,7 +136,7 @@ def get_data_dict(tok, texts, basic_data, max_seq_len):
     # Change data to dictionary format (ID pointing to sequence and label)
     data_dict = {}
     for i in range(len(basic_data)):
-        data_dict[basic_data[i][0]] = [seqs[i], basic_data[i][2]]    
+        data_dict[basic_data[i][0]] = [seqs[i], basic_data[i][2]]
     
     
     # Return final data dictionary
@@ -168,14 +225,28 @@ def get_data(final_img_dims, max_seq_len):
     def convert_to_correct_words(str):
         return (str.replace('ha ', 'has ').replace('blccks', 
                     'blocks').replace('squere', 'square').replace(
-                    'tocuhing', 'touching'))
-   
+                    'tocuhing', 'touching').replace('bellow', 
+                    'below').replace('eactly', 'exactly').replace(
+                    'wth','with').replace('leats', 'least').replace(
+                    'yelloe', 'yellow').replace('exacrly', 
+                    'exactly').replace('bkack', 'black'). replace(
+                    'ciircles', 'circles').replace('hte', 
+                    'the').replace('wirh', 'with').replace('trianlge', 
+                    'triangle').replace('touhing', 'touching').replace(
+                    'yelllow', 'yellow').replace('exacty', 
+                    'exactly').replace('sqaures', 'squares').replace(
+                    'tleast', 'at least').replace('isa', 
+                    'is a').replace('objetcs', 'objects'))
+    
     train_texts = [ convert_to_correct_words(tup[1]) for tup in train_data ]
     test_texts = [ convert_to_correct_words(tup[1]) for tup in test_data ]
+    syn_sentence = ' '.join([ word for syn_list in synonyms for word in syn_list ])
     
-    combined_texts = train_texts + test_texts    
+    combined_texts = train_texts + test_texts
+    combined_texts.append(syn_sentence)
+    
     tokenizer = get_tokenizer(combined_texts)
-
+            
     
     # Get data dictionary for training and test sets
     train_data_dict = get_data_dict(tokenizer, train_texts, train_data, max_seq_len)
