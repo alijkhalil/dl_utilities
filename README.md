@@ -9,7 +9,7 @@ it includes the following:
 		increasing Dropout and Stochasitc Depth rates
 		as well as one for decreasing a cosine annealing 
 		SGD learning rate
-	-dataset processing, downloading, and management utilities
+	-general dataset processing, downloading, and management utilities
 	-triplet loss batch generator, loss functions, and train routines
 	-NLP tools for getting pre-calculated word vectors
 	-Visual Question and Answering (VQA) dataset generators and  
