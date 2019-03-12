@@ -3,12 +3,16 @@ import os, gc, time
 import random, multiprocessing
 import numpy as np
 
-from skvideo.io import FFmpegReader
+import cv2		# pip install opencv-python
 from xml.etree import ElementTree
+from skvideo.io import FFmpegReader
 
 
 
 # Global variables
+PRINT_ERRORS=False
+
+MIN_TRAIN_SET_PERCENTAGE=0.5
 MIN_NUM_GAMES_IN_DATASET=75
 
 MIN_FRAMES_P_EVENT=200
@@ -45,11 +49,45 @@ POSS_PER_DIGIT=11
 
 
 # Helper functions    
+def which(program):
+    def is_executable(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_executable(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exec_file = os.path.join(path, program)
+            if is_executable(exec_file):
+                return exec_file
+
+    return None
+
+	
 def get_subdirs(parent_dir):
     return [ parent_dir + "/" + name for name in os.listdir(parent_dir)
                                 if os.path.isdir(os.path.join(parent_dir, name)) ]
 
-                                
+								
+def adj_brightness(image, brightness_adj_val):
+    # Convert 2 HSV colorspace from RGB colorspace
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    
+	# Generate new random brightness
+    hsv[:, :, 2] = brightness_adj_val * hsv[:, :, 2]
+	
+	# Convert back to RGB colorspace
+    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+	
+def hflip_img(image):
+    return cv2.flip(image, 0)
+
+	
+								
+# Useful utility functionality specifically for building a NBA PBP generator								
 def get_game_dirs(root_database_dir):
         game_dirs = [ cur_game_dir for cur_game_dir in get_subdirs(root_database_dir) 
                             if os.path.isfile(cur_game_dir + "/" + DONE_FILE) ]
@@ -58,7 +96,7 @@ def get_game_dirs(root_database_dir):
         return game_dirs
 
         
-def get_event_dirs(game_id_dir):
+def get_game_event_dirs(game_id_dir):
     game_id_events = get_subdirs(game_id_dir)                            
     random.shuffle(game_id_events)
 
@@ -115,11 +153,16 @@ def get_xml_info(label_xml_path):
     return (("".join(event_labels)), jersey_nums, time_vals)
    
    
-def get_mp4_frames(mp4_path, skip_frames, num_frames_per_event):
+def get_mp4_frames(mp4_path, skip_frames, num_frames_per_event, 
+						do_flip, brighten_val):
+						
     # Get mp4 reader
     try:
         reader = FFmpegReader(mp4_path)     
-    except:
+    except Exception as e:
+        if PRINT_ERRORS:
+            print(e)
+			
         return None
         
     # Get starting frame
@@ -141,6 +184,14 @@ def get_mp4_frames(mp4_path, skip_frames, num_frames_per_event):
             cur_offset = cur_frame - start_frame
             if cur_i < num_frames_per_event and (cur_offset % skip_frames) == 0:
                 frame_array[cur_i, :, :, :] = frame
+				
+                if brighten_val < 1.0:
+				    frame_array[cur_i, :, :, :] = adj_brightness(frame_array[cur_i, :, :, :],
+																		brighten_val)
+				
+                if do_flip:
+                    frame_array[cur_i, :, :, :] = hflip_img(frame_array[cur_i, :, :, :])
+					
                 cur_i += 1
                 
         cur_frame += 1
@@ -233,49 +284,81 @@ def time_digits_to_one_hot(time_vals):
         -output_set
             -list or tuple with any combination of the 'events', 'jersey_nums', and/or 'time_remaining' strings
             -will dictate the types of output labels produced by the generator
+		-is_validation
+			-boolean indicating whether to use training or validatoin set
+			-by default it is set to False so it returns the training set generator
+		-validation_split
+			-float between MIN_TRAIN_SET_PERCENTAGE and 1.0, inclusive
+			-default value of 1.0 indicates the training set generator uses the entire <event_files_dir> directory
+        -use_video_aug
+			-boolean indicating whether to augment videos with hortizontal flipping and brightness adjustment
+			-due to large size of entire dataset, this is probably not needed
         -queue_size
             -integer representing the maximum number of batches for queue to hold
             -will block when attempting to add more items to the queue
             -therefore limits maximum memory consumption of each process filling the queue
-        -nthread
+		-nthread
             -integer representing number of worker threads
             -like with 'batch_size' and 'queue_size', this value should not be adjusted to system's memeory resources
 '''
+
+DEFAULT_EXTRA_ARGS = { 'event_types': ['high', 'med'], 'imbalance_factor': 0.3, 
+							'event_level_input': True, 'num_frames_per_event': 250, 
+							'use_high_res': False, 'output_set': ['events'], 
+							'is_validation': False, 'validation_split': 1.0,
+							'use_video_aug': False, 'queue_size': 16, 'nthreads': 2 }
+
+
+# Look at DEFAULT_EXTRA_ARGS (above) for pre-initialized parameters for the initializer							
 class multi_thread_nba_pbp_gen(object):
-    def __init__(self, event_files_dir, batch_size, event_types=['high', 'med'],
-                        imbalance_factor=0.3, event_level_input=True, 
-                        num_frames_per_event=250, use_high_res=False, 
-                        output_set=['events'], queue_size=16, nthreads=2):	
-                    
+    def __init__(self, event_files_dir, batch_size, **kwargs):	
+
+		# Get other defined parameters
+        if kwargs is None:
+		    kwargs = DEFAULT_EXTRA_ARGS
+        else:
+            kwargs = dict(DEFAULT_EXTRA_ARGS.items() + kwargs.items())
+			
+			
         # Set-up presistent global/shared variables        
+        self.imbalance_factor = kwargs['imbalance_factor']
         self.out_options = [ False ] * len(VALID_OUTPUT_OPTS)
         
         self.thread_list = []
-        self.nthreads = nthreads
         self.batch_size = batch_size
+        self.nthreads = kwargs['nthreads']
         
-        self.event_level_input = event_level_input
-        self.num_frames_per_event = num_frames_per_event
-        self.use_high_res = use_high_res
-                
-        self.q = multiprocessing.Queue(maxsize=queue_size)	                
+        self.event_level_input = kwargs['event_level_input']
+        self.num_frames_per_event = kwargs['num_frames_per_event']
+        self.use_high_res = kwargs['use_high_res']
+        self.use_video_aug = kwargs['use_video_aug']
+		
+        self.q = multiprocessing.Queue(maxsize=kwargs['queue_size'])	                
         self.manager = multiprocessing.Manager()
         self.remaining_game_lock = multiprocessing.Lock()
         self.remaining_game_list = self.manager.list()  
 
-        
+       
+        # Ensure 'ffmpeg' and 'ffprobe' are available	   
+        if which("ffmpeg") is None:
+            raise ValueError("The directory containing the 'ffmpeg' utility must be on the system's PATH.") 
+			
+        if which("ffprobe") is None:
+            raise ValueError("The directory containing the 'ffprobe' utility must be on the system's PATH.") 
+			
+   
         # Check event_types argument and set up events list
         self.poss_event_list = []
-        if not isinstance(event_types, (list, tuple)):
+        if not isinstance(kwargs['event_types'], (list, tuple)):
             raise ValueError('The <event_types> parameter must be a list or tuple.') 
 
-        if len(event_types) < 0:
+        if len(kwargs['event_types']) < 0:
             raise ValueError('The <event_types> list cannot be empty.') 
             
-        if len(event_types) > 3:
+        if len(kwargs['event_types']) > 3:
             raise ValueError('The <event_types> list has too many options.') 
         
-        for e_type in event_types:
+        for e_type in kwargs['event_types']:
             if e_type == 'high':
                 self.poss_event_list.extend(HIGH_FREQ_EVENTS)
             elif e_type == 'med':
@@ -303,30 +386,44 @@ class multi_thread_nba_pbp_gen(object):
             
             
         # Use 'game_events' directory for completed games list
-        random.seed(os.getpid())
+        random.seed(os.getpid())	# DO NOT DELETE - REQUIRED FOR 'GET_GAME_DIRS' CALL BELOW	
 
         if not os.path.isdir(event_files_dir):
             raise ValueError('The string for <event_files_dir> does not exist.') 
             
-        self.subdirs = get_game_dirs(event_files_dir)
+		# Divide into training and validation sets if necessary
+        self.subdirs = get_game_dirs(event_files_dir)			
+        split_sets_percent = kwargs['validation_split']
+		
+        if split_sets_percent < 1.0:
+            if split_sets_percent < MIN_TRAIN_SET_PERCENTAGE:
+                raise ValueError("The 'validation_split' parameter must be greater than %f." % MIN_TRAIN_SET_PERCENTAGE) 
+			
+            split_i = int(split_sets_percent * len(self.subdirs))
+            if kwargs['is_validation']:
+			    self.subdirs = self.subdirs[split_i:]
+            else:
+                self.subdirs = self.subdirs[:split_i]
+
         if len(self.subdirs) <= MIN_NUM_GAMES_IN_DATASET:
             raise ValueError('Not enough sub-directories (representing number of games) in the <event_files_dir>.') 
-            
+				
+		# Copy list into remaining_games list		
         for cur_dir in self.subdirs:
             self.remaining_game_list.append(cur_dir)
-            
+
             
         # Check output options
-        if not isinstance(output_set, (list, tuple)):
+        if not isinstance(kwargs['output_set'], (list, tuple)):
             raise ValueError('The <output_set> parameter must be a list or tuple.') 
 
-        if len(output_set) < 0:
+        if len(kwargs['output_set']) < 0:
             raise ValueError('The <output_set> list cannot be empty.') 
             
-        if len(output_set) > len(VALID_OUTPUT_OPTS):
+        if len(kwargs['output_set']) > len(VALID_OUTPUT_OPTS):
             raise ValueError('The <output_set> list has too many options.') 
         
-        for output_type in output_set:  
+        for output_type in kwargs['output_set']:  
             if output_type == VALID_OUTPUT_OPTS[LABEL_INDEX]:
                 self.out_options[LABEL_INDEX] = True
             elif output_type == VALID_OUTPUT_OPTS[JERSEY_INDEX]:
@@ -347,14 +444,15 @@ class multi_thread_nba_pbp_gen(object):
             label_dict = {}
             
             actual_imbalance_factor = float(1./len(self.poss_event_list))
-            actual_imbalance_factor += ((1. - actual_imbalance_factor) * imbalance_factor)
+            actual_imbalance_factor += ((1. - actual_imbalance_factor) * self.imbalance_factor)
             max_videos_p_event = (int(self.batch_size * NUM_BATCH_BEFORE_LOAD * 
                                             actual_imbalance_factor) + 1)
             
             min_list_size = self.batch_size * NUM_BATCH_BEFORE_LOAD
             if not self.event_level_input:
                 min_list_size *= self.num_frames_per_event
-            
+
+				
             while True:
                 # Continually try to process new game
                 time.sleep(2 * self.nthreads)
@@ -369,7 +467,7 @@ class multi_thread_nba_pbp_gen(object):
                     
                     
                 # Get set of events and process them
-                game_events = get_event_dirs(game_dir)                
+                game_events = get_game_event_dirs(game_dir)                
                 while len(game_events) > 0:
                     # Pick a finished event
                     cur_event_dir = game_events.pop()
@@ -382,7 +480,6 @@ class multi_thread_nba_pbp_gen(object):
                             
                     if unfinished:
                         continue
-                    
                     
                     # Process valid event XML file for labels
                     label_xml_path = cur_event_dir + "/" + EVENT_FILE
@@ -417,8 +514,19 @@ class multi_thread_nba_pbp_gen(object):
 
                     skip_val = SKIP_FRAMES_EVENT if self.event_level_input else SKIP_FRAMES_NO_EVENT                                                                
                     
-                    frame_array = get_mp4_frames(mp4_path, skip_val, self.num_frames_per_event)
+                    if self.use_video_aug:
+                        rand_flip = int(1000 * random.uniform(0.0, 1.0))
+                        rand_flip = True if rand_flip % 2 == 0 else False
+                        rand_bright = random.uniform(0.35, 1.0)						
+                    else:
+                        rand_flip = False
+                        rand_bright = 1.0											
+					
+                    frame_array = get_mp4_frames(mp4_path, skip_val, self.num_frames_per_event,
+													rand_flip, rand_bright)
+                    
                     if frame_array is None:
+                        label_dict[event_label] -= 1
                         continue
                     
                     
@@ -512,3 +620,41 @@ class multi_thread_nba_pbp_gen(object):
                 thread.terminate()
             
         self.q.close()			
+
+		
+# Function to get complementing training and validation set NBA PBP generators
+# Uses the exact same parameters as the 'multi_thread_nba_pbp_gen' generator above
+def get_train_val_nba_pbp_gens(event_files_dir, batch_size, 
+								validation_split, **kwargs):
+								
+    train_gen = multi_thread_nba_pbp_gen(event_files_dir, batch_size, 
+											validation_split=validation_split, 
+											is_validation=False, **kwargs)	
+											
+    val_gen = multi_thread_nba_pbp_gen(event_files_dir, batch_size,
+											validation_split=validation_split, 
+											is_validation=True, **kwargs)	
+		
+    return (train_gen, val_gen)
+
+
+	
+
+    
+'''        
+############ MAIN
+
+print("Hello world.")
+mama, mama_val = get_train_val_nba_pbp_gens('/mnt/efs/pbp_dataset/game_events', 4, 
+                                    nthreads=2, event_level_input=False,
+                                    imbalance_factor=.7, validation_split = 0.7,
+									use_video_aug=True)
+									
+whats_next = mama.next()
+print(type(whats_next))
+print(type(whats_next[0]))
+print(whats_next[0][0].shape)
+print(whats_next[1][0].shape)
+print(whats_next[1][0])
+quit()
+'''
