@@ -1,5 +1,5 @@
 # Import statements
-import os, gc, time
+import os, gc, time, atexit
 import random, multiprocessing
 import numpy as np
 
@@ -654,6 +654,9 @@ class multi_thread_nba_pbp_gen(object):
             self.thread_list.append(t)
             t.start()
 
+        # Ensure that underlying processes are always terminated at the end
+        atexit.register(self.stop_all_threads)
+            
             
     # Iterator returns itself
     def __iter__(self):
@@ -744,11 +747,19 @@ class multi_thread_nba_pbp_gen(object):
 
     # Stop the generator altogether (e.g. destructor) at the end of use
     def stop_all_threads(self):
-        for thread in self.thread_list:
-            if thread.is_alive():
-                thread.terminate()
+        try:
+            for thread in self.thread_list:
+                if thread.is_alive():
+                    thread.terminate()
+                
+            self.q.close()			
+            self.manager.shutdown()
             
-        self.q.close()			
+        except: 
+            pass
+        
+    def __del__(self): 
+        self.stop_all_threads()
 
 		
 # Function to get complementing training and validation set NBA PBP generators

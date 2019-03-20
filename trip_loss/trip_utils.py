@@ -1,7 +1,7 @@
 # Import statements
 import os, gc, sys, time
 import numpy as np
-import math, random
+import math, random, atexit
 
 import Queue
 import warnings, multiprocessing, threading
@@ -416,6 +416,9 @@ class multi_thread_trip_gen(object):
             
             self.thread_list.append(t)
             t.start()
+            
+        # Ensure that underlying processes are always terminated at the end
+        atexit.register(self.stop_all_threads)
         
         
     # Iterator returns itself
@@ -528,12 +531,19 @@ class multi_thread_trip_gen(object):
 
     # Stop the generator altogether (e.g. destructor) at the end of main thread
     def stop_all_threads(self):
-        for thread in self.thread_list:
-            if thread.is_alive():
-                thread.terminate()
+        try:
+            for thread in self.thread_list:
+                if thread.is_alive():
+                    thread.terminate()
+                
+            self.q.close()			
+            self.manager.shutdown()
             
-        self.q.close()			
-
+        except: 
+            pass
+        
+    def __del__(self): 
+        self.stop_all_threads()
     
     
 
