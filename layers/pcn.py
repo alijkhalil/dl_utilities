@@ -13,7 +13,7 @@ from keras.initializers import Constant
 
 
 INIT_MULTIPLER=3.5
-
+DEFAULT_EPSILON=1E-6
 
 ''' 
 These are custom layers for use in an PCN cell.
@@ -30,8 +30,10 @@ def NormalizePerChannel(name=None):
         ch_tensors = []
         
         for i in range(num_channels):
-            div_val = K.sqrt(K.sum(K.square(x[:, :, :, i]), axis=(1, 2), keepdims=True))            
-            new_channels = K.expand_dims(tf.divide(x[:, :, :, i], div_val))
+            div_val = K.sqrt(K.sum(K.square(x[:, :, :, i]), axis=(1, 2), keepdims=True))     
+            # new_channels = K.expand_dims(tf.divide(x[:, :, :, i], div_val))            # OLD METHOD
+            chan_norm = x[:, :, :, i] / (div_val + DEFAULT_EPSILON)
+            new_channels = K.expand_dims(chan_norm)
             
             ch_tensors.append(new_channels)
             

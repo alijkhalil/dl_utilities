@@ -15,7 +15,7 @@ from keras.layers.merge import add, multiply, _Merge
 from keras.initializers import Constant
 
 
-DEFAULT_EPSILON=1E-5
+DEFAULT_EPSILON=1E-6
 
 
 

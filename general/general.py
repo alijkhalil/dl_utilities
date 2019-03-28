@@ -127,6 +127,50 @@ def amplify_end_tok_from_one_hot(one_hot_input, amplify_factor, end_token_ID=1):
     
     # Return resulting vector
     return one_hot_input       
+  
+  
+# Print internal layers for recurrent cell   
+def print_internal_RNN_layers(rnn_cell_layer):
+    default_positions = [12, 60, 90, 110]
+    def print_row(fields, positions=default_positions):
+        line = ''
+        
+        for i in range(len(fields)):
+            if i > 0:
+                line = line[:-1] + ' '
+            line += str(fields[i])
+            line = line[:positions[i]]
+            line += ' ' * (positions[i] - len(line))
+            
+        print(line)
+
+    def print_layer(count, name, layer):
+        """Prints a summary for a single layer.
+
+        # Arguments
+            count: index integer value.
+            name: layer name string.
+            layer: target layer object.
+        """
+        try:
+            output_shape = layer.output_shape
+        except AttributeError:
+            output_shape = 'multiple'
+        
+        cls_name = layer.__class__.__name__
+        fields = [count, name + ' (' + cls_name + ')',
+                  output_shape, layer.count_params()]
+        print_row(fields)
+                  
+    # Print labels
+    print(rnn_cell_layer.name.upper())
+    label_positions = [ pos - 3 for pos in default_positions ]
+    print_row(['Number', '|  Layer Name', '|  Output Shape', '|  Num of Parms'], label_positions)
+    
+    # Print layer values
+    for i, layer_items in enumerate(rnn_cell_layer.__dict__['internal_layers'].iteritems()):
+            layer_name, cur_layer = layer_items
+            print_layer(i, layer_name, cur_layer)
     
     
 # Decode encoded sequence and return it
