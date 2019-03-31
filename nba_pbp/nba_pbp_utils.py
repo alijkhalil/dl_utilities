@@ -25,8 +25,11 @@ MIN_VALIDATION_GAMES_IN_DATASET=50
 MIN_FRAMES_P_EVENT=150
 MAX_FRAMES_P_EVENT=300
 
-SKIP_FRAMES_EVENT=3
-SKIP_FRAMES_NO_EVENT=15
+MIN_SKIP_FRAMES=1
+MAX_SKIP_FRAMES=50
+
+DEFAULT_SKIP_FRAMES_EVENT=3
+DEFAULT_SKIP_FRAMES_NO_EVENT=15
 
 MAX_THREADS=64
 NUM_BATCH_BEFORE_LOAD=3
@@ -305,6 +308,10 @@ def time_digits_to_one_hot(time_vals):
         -num_frames_per_event
             -integer signifying how many of the middle frames of the video to use as input
             -should be no lower than 200 and no higher than 300
+        -skip_val
+            -None (indicating default value) or integer signifying selection-to-skip ratio when yielding video input
+            -modifying this value can have a significant impact on the memory footprint of the generator
+            -values should be no smaller than 1 and no larger than MAX_SKIP_FRAMES
         -use_high_res
             -boolean indicating whether to use low or high resolution video
             -note that high resolution videos will consume significantly more memory
@@ -330,8 +337,8 @@ def time_digits_to_one_hot(time_vals):
 '''
 
 DEFAULT_EXTRA_ARGS = { 'event_types': ['high', 'med'], 'keep_cur_balance_factor': 0.3, 
-							'event_level_input': True, 'num_frames_per_event': 250, 
-							'use_high_res': False, 'output_set': ['events'], 
+							'event_level_input': True, 'num_frames_per_event': 250,
+                            'skip_val': None, 'use_high_res': False, 'output_set': ['events'], 
 							'is_validation': False, 'validation_split': 1.0,
 							'use_video_aug': False, 'queue_size': 24, 'nthreads': 2 }
 
@@ -357,6 +364,7 @@ class multi_thread_nba_pbp_gen(object):
         
         self.event_level_input = kwargs['event_level_input']
         self.num_frames_per_event = kwargs['num_frames_per_event']
+        self.skip_val = kwargs['skip_val']
         self.use_high_res = kwargs['use_high_res']
         self.use_video_aug = kwargs['use_video_aug']
 		
@@ -406,10 +414,17 @@ class multi_thread_nba_pbp_gen(object):
         if self.nthreads > MAX_THREADS or self.nthreads < 1:
             raise ValueError('The <nthreads> value is invalid.') 
         
-        if self.event_level_input:
-            self.num_frames_per_event = int(self.num_frames_per_event // SKIP_FRAMES_EVENT)
-        else:
-            self.num_frames_per_event = int(self.num_frames_per_event // SKIP_FRAMES_NO_EVENT)
+        if self.skip_val is None:
+            if self.event_level_input:
+                self.skip_val = DEFAULT_SKIP_FRAMES_EVENT
+            else:
+                self.skip_val = DEFAULT_SKIP_FRAMES_NO_EVENT
+                
+        elif self.skip_val < MIN_SKIP_FRAMES or self.skip_val > MAX_SKIP_FRAMES:
+            raise ValueError("The <skip_val> should be either None or a value between %d and %d, inclusive." % 
+                                (MIN_SKIP_FRAMES, MAX_SKIP_FRAMES))
+                                
+        self.num_frames_per_event = int(self.num_frames_per_event // self.skip_val)
             
             
         # Use 'game_events' directory for completed games list
@@ -564,8 +579,6 @@ class multi_thread_nba_pbp_gen(object):
                         mp4_path += HIGH_RES_FILE
                     else:
                         mp4_path += LOW_RES_FILE
-
-                    skip_val = SKIP_FRAMES_EVENT if self.event_level_input else SKIP_FRAMES_NO_EVENT                                                                
                     
                     if self.use_video_aug:
                         rand_flip = int(1000 * random.uniform(0.0, 1.0))
@@ -575,7 +588,7 @@ class multi_thread_nba_pbp_gen(object):
                         rand_flip = False
                         rand_bright = 1.0											
 					
-                    frame_array = get_mp4_frames(mp4_path, skip_val, self.num_frames_per_event,
+                    frame_array = get_mp4_frames(mp4_path, self.skip_val, self.num_frames_per_event,
 													rand_flip, rand_bright, self.use_high_res, 
                                                     self.use_video_aug)
                     
