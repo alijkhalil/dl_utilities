@@ -18,7 +18,7 @@ from keras.models import Model
 from keras.callbacks import Callback
 
 
-DEFAULT_TRIP_LOSS_PERCENT=0.1
+DEFAULT_TRIP_LOSS_PERCENT=0.15
 
 
 
@@ -482,10 +482,10 @@ class multi_thread_trip_gen(object):
         
         self.parameter_list['batch_size'] = batch_size
         self.parameter_list['margin'] = margin
-        self.parameter_list['dynamic_margin'] = dynamic_margin
+        self.parameter_list['dynamic_margin'] = dynamic_margin  # Adjusts current margin if it is too hard or too easy
         
         self.parameter_list['skip_percentage'] = skip_percentage
-        self.parameter_list['max_per_anchor'] = max_per_anchor
+        self.parameter_list['max_per_anchor'] = max_per_anchor  # To avoid overuse of a small subset of inputs
         self.parameter_list['is_L2'] = is_L2
                 
         with self.new_alpha.get_lock():
@@ -624,6 +624,8 @@ def trip_l2_loss(margin):
 #####################   General Utilities   #####################
 
 # Get class indices to be ready for generator
+# Outputs list of N (e.g. number of categories) lists 
+#   where each list contains the input indices for that categories
 def break_down_class_indices(training_labels):
     class_indices = [[] for i in range(training_labels.shape[1])]
     for index, one_hot_label in enumerate(training_labels):
@@ -633,6 +635,12 @@ def break_down_class_indices(training_labels):
 
 
 # Return compiled triplet version of a model
+# opt - cross-entropy loss function optimizer
+# margin - value for margin to be used in loss function and in generating triplets
+# expected_loss - realistic desired/expected total/final loss (given the percent_trip_loss loss value below)
+#                  total/final loss = (trip_loss_val * percent_trip_loss) + (xentropy_loss_val * (1-percent_trip_loss))
+# percent_trip_loss - portion of total/final loss dervived by triplet loss value
+# is_L2 - use L2 distance function (as oppposed to L1 distance) for triplet loss function 
 def convert_model_to_trip_model(model, opt, margin, expected_loss, 
                                 percent_trip_loss=DEFAULT_TRIP_LOSS_PERCENT, 
                                 is_L2=True):
@@ -653,7 +661,7 @@ def convert_model_to_trip_model(model, opt, margin, expected_loss,
             ideal_final_margin_portion = 0.5
         
         # Get normal and triplet margin loss weight
-        margin_factor = float((percent_trip_loss * expected_loss) 
+        margin_factor = float((percent_trip_loss * expected_loss)
                                 / (margin * ideal_final_margin_portion))
         
         xtropy_factor = 1.0 - float(percent_trip_loss)
